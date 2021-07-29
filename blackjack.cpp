@@ -1,9 +1,20 @@
 #include <iostream>
 #include <string.h>
 #include <vector>
+#include <ctime>
+#include <cassert>
 #define MAX_NAME 10
+#define N_SUIT 4
+#define N_RANK 13
 enum SUIT{hearts = 3, diamonds, clubs, spades};
 enum RANK{rank_A = 1, rank_2, rank_3, rank_4, rank_5, rank_6, rank_7, rank_8, rank_9, rank_10, rank_J, rank_Q, rank_K};
+enum END{end_win, end_lose, end_push};
+int getPlayersCount(std::string s, int n);
+std::string getFormatName(std::string buffer);
+bool isYes(std::string question);
+template <class T> void vector_mix(std::vector<T> & vec);
+class GenericPlayer;
+//------------------------------------------------------------------------
 class Card
 {
 private:
@@ -17,19 +28,10 @@ public:
 	int getValue() {if(m_rank > 10) return 10; return m_rank;}
 	std::string getCardString();
 };
-class Hand
-{
-private:
-	std::vector<Card*> m_cards;
-public:
-	void add(Card* c){m_cards.push_back(c);}
-	void clear(){m_cards.clear();};
-	int getTotal();
-	void print(std::string s1);
-};
 std::string Card::getCardString()
 {
 	std::string res;
+	if(!m_isFaceUp) return "   ";
 	switch(m_rank)
 	{
 		case rank_2: res = " 2"; break;
@@ -45,15 +47,29 @@ std::string Card::getCardString()
 		case rank_Q: res = " Q"; break;
 		case rank_K: res = " K"; break;
 		case rank_A: res = " A"; break;
-		default: res = "ERROR";
+		default: assert(false);
 	}
 	return (res + (char)m_suit);	
+};
+//------------------------------------------------------------------------
+class Hand
+{
+protected:
+	std::vector<Card*> m_cards;
+public:
+	Hand(){};
+	void add(Card* c){m_cards.push_back(c);}
+	void clear(){m_cards.clear();};
+	int getTotal();
+	void print(std::string s, std::string e);
+	void flip(){for(int i=0; i<m_cards.size(); ++i) m_cards[i]->flip();}
+	std::vector<Card*> & getCards(){return m_cards;}
 };
 int Hand::getTotal()
 {
 	int res = 0;
 	bool A = false;
-	for(int i=0; i<m_cards.size(); i++)
+	for(int i=0; i<m_cards.size(); ++i)
 	{
 		A = A || (m_cards[i]->getRank() == RANK::rank_A);
 		res+=m_cards[i]->getValue();
@@ -61,63 +77,256 @@ int Hand::getTotal()
 	if(A && res <= 11) res+=10;
 	return res;	
 }
-void Hand::print(std::string s = "")
+void Hand::print(std::string s = "", std::string e = "")
 {	
 	unsigned char a[] = {201, 205, 205, 205, 187, 0};
 	unsigned char b[] = {200, 205, 205, 205, 188, 0};
 	unsigned char c = 186;
-	std::cout << std::string(MAX_NAME, 32);
-	for(int i=0; i<m_cards.size(); i++) 
-		std::cout << a;
-	std::cout << std::endl << s;
-	for(int i=0; i<m_cards.size(); i++) 
+	std::cout << std::string(s.size()+1, 32);
+	for(int i=0; i<m_cards.size(); ++i) 
+		std::cout << a;	
+	std::cout << std::endl << s << " ";	
+	for(int i=0; i<m_cards.size(); ++i) 
 		std::cout << c << m_cards[i]->getCardString() << c;
-	std::cout << std::endl << std::string(MAX_NAME, 32);
-	for(int i=0; i<m_cards.size(); i++) 
+	std::cout << " " << e << std::endl << std::string(s.size()+1, 32);
+	for(int i=0; i<m_cards.size(); ++i) 
 		std::cout << b;
 	std::cout << std::endl;
+}
+//------------------------------------------------------------------------
+class Deck : public Hand
+{
+public:
+	Deck():m_currentCard(0) {populate();}
+	~Deck(){for(int i=0; i<m_cards.size(); ++i) delete m_cards[i];}
+	void shuffle(){m_currentCard = 0; vector_mix<Card*>(m_cards);}
+	void deal(Hand * aH){aH->getCards().push_back(m_cards[m_currentCard]); m_cards[m_currentCard++]->flip();}
+private:
+	void populate();
+	int m_currentCard;
+};
+void Deck::populate()
+{
+	m_cards.resize(N_SUIT*N_RANK);
+	int k = 0;
+	for(int i=hearts; i<=spades; ++i)
+	{
+		for(int j=rank_A; j<=rank_K; ++j)
+			m_cards[k++] = new Card((RANK)j, (SUIT)i);
+	}
+}
+//------------------------------------------------------------------------
+class GenericPlayer : public Hand
+{
+protected:
+	std::string m_name;	
+	int score;
+	bool isBusted(){return getTotal() > 21;}
+	
+public:	
+	GenericPlayer(std::string n):m_name(n), score(0){};	
+	virtual bool isHitting() = 0;
+	void print(){Hand::print(getTitle(), isBusted()?bust():"");}
+	void endOfTurn(GenericPlayer * house);
+private:
+	std::string bust(){return "BUST !!";}
+	std::string win(){return "WIN !!";}
+	std::string lose(){return "LOSE !!";}
+	std::string push(){return "PUSH !!";}
+	std::string getTitle();
+
+};
+std::string GenericPlayer::getTitle()
+{
+	char temp[10];
+	if(score < 0)
+		sprintf(temp, "%04d", score);
+	else
+		sprintf(temp, "+%03d", score);
+	return m_name + " (points: " + temp + ")";
+}
+void GenericPlayer::endOfTurn(GenericPlayer * house)
+{
+	END res;	
+	if((isBusted() && house->isBusted()) || (getTotal() == house->getTotal()))
+		res = end_push;
+	else
+	{
+		if(isBusted()) 
+			res = end_lose;
+		else if(house->isBusted())
+			res = end_win;
+		else
+			res = (getTotal() > house->getTotal())?end_win:end_lose;	
+	}
+	switch(res)
+	{
+		case end_push:
+			Hand::print(getTitle(), push());
+			break;
+		case end_lose:
+			--score;
+			++(house->score);
+			Hand::print(getTitle(), lose());
+			break;
+		case  end_win:
+			++score;
+			--(house->score);
+			Hand::print(getTitle(), win());
+			break;
+		default:
+			assert(false);
+	}
+}
+//------------------------------------------------------------------------
+class Player_Human : public GenericPlayer
+{
+public:
+	Player_Human(std::string n):GenericPlayer(n){}
+private:
+	bool isHitting(){return false;}
+	
+};
+//------------------------------------------------------------------------
+class Player_AI : public GenericPlayer
+{
+public:
+	Player_AI(std::string n):GenericPlayer(n){}
+private:
+	bool isHitting(){return false;}
+};
+//------------------------------------------------------------------------
+class House : public GenericPlayer
+{
+public:
+	House():GenericPlayer(getFormatName("[ CASINO ]")){}
+	void flipFirstCard(){m_cards[0]->flip();}
+private:
+	bool isHitting(){return false;}
+};
+//------------------------------------------------------------------------
+class Game
+{
+private:
+	Deck m_deck;
+	std::vector<GenericPlayer*> m_players; //Player_Human + Player_AI + House
+public:
+	Game(std::vector <std::string> & pl_h, std::vector <std::string> & pl_ai);
+	~Game(){for(int i=0; i<m_players.size(); ++i) delete m_players[i];};
+	void rePrint(){system("cls"); for(int i=0; i<m_players.size(); ++i) m_players[i]->print();}
+	void play();	
+};
+Game::Game(std::vector <std::string> & pl_h, std::vector <std::string> & pl_ai)
+{
+	srand(time(NULL));
+	m_players.resize(pl_h.size()+pl_ai.size());
+	for(int i=0; i<pl_h.size(); ++i) m_players[i] = new Player_Human(pl_h[i]);
+	for(int i=0; i<pl_ai.size(); ++i) m_players[i+pl_h.size()] = new Player_AI(pl_ai[i]);
+	vector_mix<GenericPlayer*>(m_players);
+	m_players.push_back(new House());
+}
+void Game::play()		
+{	
+	House * house = ((House *)m_players.back());
+	m_deck.shuffle();
+	for(int i=0; i<m_players.size(); ++i)
+	{
+		m_players[i]->flip();
+		m_players[i]->clear();
+	}	
+	for(int j=0; j<2; ++j)
+	{
+		for(int i=0; i<m_players.size(); ++i) 
+			m_deck.deal(m_players[i]);
+	}	
+	house->flipFirstCard();
+	rePrint();	
+	for(int i=0; i<m_players.size(); ++i)
+	{
+		while(m_players[i]->isHitting())
+		{
+			m_deck.deal(m_players[i]);			
+			rePrint();
+		}
+	}
+	system("cls");
+	for(int i=0; i<m_players.size()-1; ++i)
+		m_players[i]->endOfTurn(house);
+	house->flipFirstCard();
+	house->print();
+}
+//------------------------------------------------------------------------
+int getPlayersCount(std::string question, int n)
+{
+	int res = 0;
+	std::string buffer;
+	while (res < 1 || res > 7)
+    {
+        std::cout << question << " (1 - " << n << "): ";
+        std::cin >> buffer;
+		try {res = std::stoi(buffer);}
+		catch(std::invalid_argument e) {res = 0;}
+    }	
+	return res;
+}
+std::string getFormatName(std::string buffer)
+{
+	std::string res(MAX_NAME, '.');
+	if(buffer.size() < MAX_NAME)
+		res.replace(0, buffer.size(), buffer);
+	else
+		res.replace(0, MAX_NAME, buffer, 0, MAX_NAME);
+	return res;	
+}
+bool isYes(std::string question)
+{
+	std::string buffer = "";	
+	std::cout << std::endl;
+    while (buffer != "n" && buffer != "N" && buffer != "y" && buffer != "Y")
+    {		
+        std::cout << question << " ( Y / N ): ";
+		std::cin >> buffer;
+    }
+	return (buffer == "y" || buffer == "Y");	
+}
+template <class T>
+void vector_mix(std::vector<T> & vec)
+{
+	T temp;
+	int n;
+	for(int i=0; i<vec.size(); ++i)
+	{
+		n = rand()%vec.size();
+		temp = vec[n];
+		vec[n] = vec[i];
+		vec[i] = temp;
+	}
 }
 int main()
 {
 	system("cls");
-	std::cout << "\t\tWelcome to Blackjack!\n\n";    
+	std::cout << "\t\tWelcome to Blackjack!\n\n";  
+    int numPlayers = getPlayersCount("How many players?", 7);	
+	int numHumans = (numPlayers == 1)?1:getPlayersCount("How many humans of them?", numPlayers);	
 	std::string buffer;
-    int numPlayers = 0;
-    while (numPlayers < 1 || numPlayers > 7)
-    {
-        std::cout << "How many players? (1 - 7): ";
-        std::cin >> buffer;
-		try {numPlayers = std::stoi(buffer);}
-		catch(std::invalid_argument e) {numPlayers = 0;}
-    }    
-    std::vector <std::string> names;
+    std::vector <std::string> names_H;
+	std::vector <std::string> names_AI;
     for (int i = 0; i < numPlayers; ++i)
     {
-        std::cout << "Enter name of player #" << i+1 << " (max: " << MAX_NAME << " characters): ";
-        std::cin >> buffer;		
-		if(buffer.size() < MAX_NAME)
-			names.push_back(std::string(MAX_NAME, '.').replace(0, buffer.size(), buffer));
-		else
-			names.push_back (std::string(MAX_NAME, '.').replace(0, MAX_NAME, buffer, 0, MAX_NAME));
+		if(i < numHumans)
+		{
+			std::cout << "Enter name of player #" << i+1 << " (max: " << MAX_NAME << " characters): ";
+			std::cin >> buffer;	
+			names_H.push_back(getFormatName(buffer));
+		}
+		else names_AI.push_back(getFormatName("< AI  #" + std::to_string(i-numHumans+1) + " >"));		
     }
-    system("cls");
-//	Game aGame(names);
-	buffer = "";
-    while (buffer != "n" && buffer != "N")
-    {
-//		aGame.Play();
-        std::cout << "\nDo you want to play again? (Y/N): ";
-		std::cin >> buffer;
-    }
-/*
-	Card c1(rank_3, hearts);
-	Card c2(rank_10, hearts);
-	Card c3(rank_A, hearts);
-	Hand h, h1;
-	h.add(&c1); h.add(&c2); h.add(&c3);
-	h1.add(&c1); h1.add(&c2); h1.add(&c3);
-	h.print(names[0]);	
-	h1.print(names[1]);
-*/		
+	Game aGame(names_H, names_AI);
+	do
+	{
+		aGame.play();		
+	} 
+	while(isYes("Do you want to play again?"));
+	system("cls");
 	return 0;
 } 
