@@ -4,9 +4,10 @@
 #include <ctime>
 #include <cassert>
 #define MAX_NAME 15
+#define MAX_SCORE 5
 enum SUIT{hearts = 3, diamonds, clubs, spades};
 enum RANK{rank_A = 1, rank_2, rank_3, rank_4, rank_5, rank_6, rank_7, rank_8, rank_9, rank_10, rank_J, rank_Q, rank_K};
-enum GAME{hide, start, end_win, end_lose, end_push};
+enum STATUS{turn, end_win, end_lose, end_push, play_away};
 //------------------------------------------------------------------------
 int getPlayersCount(std::string question, int nMax)
 {	
@@ -32,7 +33,6 @@ int getPlayersCount(std::string question, int nMax)
 	assert(false);
 	return -1;	
 }
-
 bool isYes(std::string question)
 {
 	std::string buffer;	
@@ -47,8 +47,7 @@ bool isYes(std::string question)
 	assert(false);
 	return false;
 }
-template <class T>
-void vector_mix(std::vector<T> & vec)
+template <class T> void vector_mix(std::vector<T> & vec)
 {
 	T temp;
 	int n;
@@ -72,6 +71,7 @@ public:
 	void flip() {m_isFaceUp = !m_isFaceUp;}
 	RANK getRank() {return m_rank;}
 	int getValue() {if(m_rank > 10) return 10; return m_rank;}
+	bool isFaceUp(){return m_isFaceUp;}
 	friend std::ostream& operator << (std::ostream& out, Card & aC);
 };
 std::ostream& operator << (std::ostream& out, Card & aC)
@@ -85,32 +85,6 @@ std::ostream& operator << (std::ostream& out, Card & aC)
 		out << "???";
 	return out;
 }
-
-/*
-std::string Card::getCardString()
-{
-	std::string res;
-	if() return "   ";
-	switch(m_rank)
-	{
-		case rank_2: res = " 2"; break;
-		case rank_3: res = " 3"; break;
-		case rank_4: res = " 4"; break;
-		case rank_5: res = " 5"; break;
-		case rank_6: res = " 6"; break;
-		case rank_7: res = " 7"; break;
-		case rank_8: res = " 8"; break;
-		case rank_9: res = " 9"; break;
-		case rank_10: res = "10"; break;
-		case rank_J: res = " J"; break;
-		case rank_Q: res = " Q"; break;
-		case rank_K: res = " K"; break;
-		case rank_A: res = " A"; break;
-		default: assert(false);
-	}
-	return (res + (char)m_suit);	
-};
-*/
 //------------------------------------------------------------------------
 class Hand
 {
@@ -122,7 +96,6 @@ public:
 	void clear(){m_cards.clear();}
 	int getTotal();
 	void flip(){for(int i=0; i<m_cards.size(); ++i) m_cards[i]->flip();}
-	std::vector<Card*> & getCards(){return m_cards;}		//xxx
 };
 int Hand::getTotal()
 {
@@ -136,23 +109,6 @@ int Hand::getTotal()
 	if(A && res <= 11) res+=10;
 	return res;	
 }
-/*
-void Hand::print(std::string s = "", std::string e = "")
-{	
-	unsigned char a[] = {201, 205, 205, 205, 187, 0};
-	unsigned char b[] = {200, 205, 205, 205, 188, 0};
-	unsigned char c = 186;
-	std::cout << std::string(s.size()+1, 32);
-	for(int i=0; i<m_cards.size(); ++i) 
-		std::cout << a;	
-	std::cout << std::endl << s << " ";	
-	for(int i=0; i<m_cards.size(); ++i) 
-		std::cout << c << m_cards[i]->getCardString() << c;
-	std::cout << " " << e << std::endl << std::string(s.size()+1, 32);
-	for(int i=0; i<m_cards.size(); ++i) 
-		std::cout << b;
-	std::cout << std::endl;
-}*/
 //------------------------------------------------------------------------
 class Deck : public Hand
 {
@@ -160,7 +116,7 @@ public:
 	Deck():m_currentCard(0) {populate();}
 	~Deck(){for(int i=0; i<m_cards.size(); ++i) delete m_cards[i];}
 	void shuffle(){m_currentCard = 0; vector_mix<Card*>(m_cards);}
-	void deal(Hand * aH){aH->getCards().push_back(m_cards[m_currentCard]); m_cards[m_currentCard++]->flip();}
+	void deal(Hand * aH){aH->add(m_cards[m_currentCard]); m_cards[m_currentCard++]->flip();}
 private:
 	void populate();
 	int m_currentCard;
@@ -175,98 +131,128 @@ void Deck::populate()
 			m_cards[k++] = new Card((RANK)j, (SUIT)i);
 	}
 }
-//--------------------------------
+//------------------------------------------------------------------------
 class GenericPlayer : public Hand
 {
 protected:
 	std::string m_name;	
 	int m_score;
-	GAME m_resultOfTurn;
+	STATUS m_status;
 public:	
-	GenericPlayer(std::string n):m_name(n), m_score(100), m_resultOfTurn(hide){};	
+	GenericPlayer(std::string n):m_name(n), m_score(MAX_SCORE){};	
 	virtual bool isHitting() = 0;
 	friend std::ostream & operator << (std::ostream & out, GenericPlayer & aGP);
 	GenericPlayer & operator ++ (){++m_score; return *this;};
-	GenericPlayer & operator -- (){--m_score; return *this;};
-	virtual void startOfTurn(){flip(); clear();}
-	virtual void endOfTurn(GenericPlayer * aGP);
+	GenericPlayer & operator -- (){if(m_score != 0) --m_score; return *this;};
+	void startOfTurn(){flip(); clear(); m_status = (m_score <= 0?play_away:turn);}
+	void endOfTurn(GenericPlayer * pl);
 	bool isBusted(){return getTotal() > 21;}
+	bool isPlayAway(){return m_status == play_away;}	
+	bool isCardsUp();
 private:
 	std::string bust(){return "BUST !!";}
 	std::string win(){return "WIN !!";}
 	std::string lose(){return "LOSE !!";}
 	std::string push(){return "PUSH !!";}
 	std::string points(){return std::to_string(getTotal()) + " points";}
-	std::string playAway(){return "PLAY AWAY !!";};
+	std::string score(){return ((m_score < 10?" ":"") + std::to_string(m_score) + "$");};
+	std::string playAway(){return "PLAY AWAY !!";}
+	
 };
+bool GenericPlayer::isCardsUp()
+{
+	for(int i=0; i<m_cards.size(); ++i)
+	{
+		if(!m_cards[i]->isFaceUp()) return true;
+	}
+	return false;
+	
+}
 std::ostream & operator <<(std::ostream & out, GenericPlayer & aGP)
 {	
-	unsigned char a[] = {201, 205, 205, 205, 187, 0};
-	unsigned char b[] = {200, 205, 205, 205, 188, 0};
-	unsigned char c = 186;
-	std::string temp;
+
+	std::string a(aGP.isPlayAway()?aGP.playAway().size()+2:5, 205); a[0] = 201; a[a.size()-1]=187;
+	std::string b(1, 186);
+		std::string temp;
 	if(aGP.m_name.size() < MAX_NAME)
-		temp = aGP.m_name + std::string(MAX_NAME - aGP.m_name.size(), '.') + " ";
+		temp = aGP.m_name + std::string(MAX_NAME - aGP.m_name.size(), '.');
 	else
-		temp = aGP.m_name.substr(0, MAX_NAME);	
-	out << std::string(temp.size(), ' ');
-		for(int i=0; i<aGP.m_cards.size(); ++i) 
-			out << a;	
-	out << std::endl << temp;	
-	for(int i=0; i<aGP.m_cards.size(); ++i) 
-		out << c << *(aGP.m_cards[i]) << c;
-	out << " ";
-	switch(aGP.m_resultOfTurn)
+		temp = aGP.m_name.substr(0, MAX_NAME);
+	temp+=" : " + aGP.score() + " ";		
+	if(aGP.isPlayAway())
 	{
-		case end_win:
-			out << aGP.win();
-			break;
-		case end_lose:
-			out << aGP.lose();
-			break;
-		case end_push:
-			out << aGP.push();
-			break;
-		case start:
-			if(aGP.isBusted()) out << aGP.bust();
-			else out << aGP.points();			
+		out << std::string(temp.size(), ' ') << a << std::endl;
+		out << temp << b << aGP.playAway() << b << std::endl;
+		a[0] = 200; a[a.size()-1]=188;
+		out << std::string(temp.size(), ' ') << a << std::endl;
 	}		
-	out << std::endl << std::string(temp.size(), ' ');
-	for(int i=0; i<aGP.m_cards.size(); ++i) 
-		out << b;
-	out << std::endl;
+	else
+	{
+		out << std::string(temp.size(), ' ');
+		for(int i=0; i<aGP.m_cards.size(); ++i) 
+			out << a;
+		out << std::endl << temp;	
+		for(int i=0; i<aGP.m_cards.size(); ++i) 
+			out << b << *(aGP.m_cards[i]) << b;		
+		out << " ";
+		switch(aGP.m_status)
+		{
+			case end_win:
+				out << aGP.win();
+				break;
+			case end_lose:
+				out << aGP.lose();
+				break;
+			case end_push:
+				out << aGP.push();
+				break;
+			case turn:
+				if(!aGP.isCardsUp())
+				{
+					if(aGP.isBusted()) out << aGP.bust();
+					else out << aGP.points();
+				}			
+		}	
+		out << std::endl << std::string(temp.size(), ' ');
+		a[0] = 200; a[a.size()-1]=188;
+		for(int i=0; i<aGP.m_cards.size(); ++i) 
+			out << a;
+			out << std::endl;
+	}
 	return out;
 }
-void GenericPlayer::endOfTurn(GenericPlayer * house)
+void GenericPlayer::endOfTurn(GenericPlayer * pl)
 {
-	if((isBusted() && house->isBusted()) || (getTotal() == house->getTotal()))
-		m_resultOfTurn = end_push;
+	if(this == pl || pl->isPlayAway()) return;
+	STATUS temp;
+	if((isBusted() && pl->isBusted()) || (getTotal() == pl->getTotal()))
+		temp = end_push;
 	else
 	{
-		if(isBusted()) 
-			m_resultOfTurn = end_lose;
-		else if(house->isBusted())
-			m_resultOfTurn = end_win;
+		if(pl->isBusted()) 
+			temp = end_lose;
+		else if(isBusted())
+			temp = end_win;
 		else
-			m_resultOfTurn = (getTotal() > house->getTotal())?end_win:end_lose;	
-		if(m_resultOfTurn == end_win)
+			temp = (getTotal() < pl->getTotal())?end_win:end_lose;	
+		if(temp == end_lose)
 		{
 			++(*this);
-			--(*house);			
+			--(*pl);			
 		}
 		else
 		{
 			--(*this);
-			++(*house);	
+			++(*pl);	
 		}
 	}
+	pl->m_status = temp;
 }
 //------------------------------------------------------------------------
 class Player_Human : public GenericPlayer
 {
 public:
 	Player_Human(std::string n):GenericPlayer(n){}
-	void startOfTurn(){GenericPlayer::startOfTurn(); m_resultOfTurn = start;}
 private:
 	bool isHitting(){return false;}
 	
@@ -285,11 +271,13 @@ class House : public GenericPlayer
 {
 public:
 	House():GenericPlayer("[HOUSE]"){}
-	void flipFirstCard(){m_cards[0]->flip();}
-	void endOfTurn(GenericPlayer * pl){flipFirstCard();}
+	void flipFirstCard(){if(m_cards.size() != 0) m_cards[0]->flip();}
 private:
 	bool isHitting(){return false;}
 };
+
+
+
 //------------------------------------------------------------------------
 class Game
 {
@@ -300,7 +288,7 @@ public:
 	Game(std::vector <std::string> & pl_h, std::vector <std::string> & pl_ai);
 	~Game(){for(int i=0; i<m_players.size(); ++i) delete m_players[i];}
 	friend std::ostream & operator << (std::ostream & out, Game & aG);
-	void play();	
+	int play();	
 };
 Game::Game(std::vector <std::string> & pl_h, std::vector <std::string> & pl_ai)
 {
@@ -314,22 +302,31 @@ std::ostream & operator << (std::ostream & out, Game & aG)
 {
 	system("cls");
 	for(int i=0; i<aG.m_players.size(); ++i) 
-		out << *(aG.m_players[i]);	
+		out << *(aG.m_players[i]);
 	return out;
 }
-void Game::play()		
+int Game::play()		
 {	
 	House * house = ((House *)m_players.back());
-	m_deck.shuffle();
+	int pl_aw = 0;
 	for(int i=0; i<m_players.size(); ++i)
 		m_players[i]->startOfTurn();
+	m_deck.shuffle();	
 	for(int j=0; j<2; ++j)
 	{
 		for(int i=0; i<m_players.size(); ++i) 
-			m_deck.deal(m_players[i]);
-	}	
+		{
+			if(m_players[i]->isPlayAway())
+				++pl_aw;
+			else
+				m_deck.deal(m_players[i]);
+		}
+	}
+
 	house->flipFirstCard();
-	std::cout << *this;	
+	std::cout << *this;
+	if(house->isPlayAway()) return -1;
+	if(m_players.size()-pl_aw == 1) return 1;	//что-то не так xxx
 	for(int i=0; i<m_players.size(); ++i)
 	{
 		while(m_players[i]->isHitting())
@@ -338,16 +335,18 @@ void Game::play()
 			std::cout << *this;
 		}
 	}
+	house->flipFirstCard();
 	for(int i=0; i<m_players.size(); ++i)
-		m_players[i]->endOfTurn(house);
+		house->endOfTurn(m_players[i]);
 	std::cout << *this;
+	return 0;
 }
 //------------------------------------------------------------------------
 int main()
 {
 	srand(time(NULL));
 	system("cls");
-	std::cout << "\t\tWelcome to Blackjack!\n\n";  
+	std::cout << "WELCOME TO BLACKJACK\n\n";  
     int numPlayers = getPlayersCount("How many players?", 7);	
 	int numHumans = (numPlayers == 1)?1:getPlayersCount("How many humans of them?", numPlayers);	
 	std::string buffer;
@@ -365,11 +364,16 @@ int main()
 	for(int i=0; i<names_AI.size(); ++i)
 		names_AI[i] = "<COMPUTER " + std::to_string(i+1) + ">";
 	Game aGame(names_H, names_AI);
+	int res;
 	do
 	{
-		aGame.play();		
+		res = aGame.play();
+		if(res != 0)
+		{
+			std::cout << "GAME OVER. HOUSE IS " << (res < 0?"LOSE !!":"WIN !!") << std::endl;
+			break;	
+		}		
 	} 
-	while(isYes("Do you want to play again?"));
-	system("cls");
+	while(isYes("Do you want to play next turn?"));
 	return 0;
 } 
