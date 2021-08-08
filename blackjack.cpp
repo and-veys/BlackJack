@@ -4,7 +4,7 @@
 #include <ctime>
 #include <cassert>
 #define MAX_NAME 15
-#define MAX_SCORE 5
+#define MAX_SCORE 21
 enum SUIT{hearts = 3, diamonds, clubs, spades};
 enum RANK{rank_A = 1, rank_2, rank_3, rank_4, rank_5, rank_6, rank_7, rank_8, rank_9, rank_10, rank_J, rank_Q, rank_K};
 enum STATUS{turn, end_win, end_lose, end_push, play_away};
@@ -140,7 +140,7 @@ protected:
 	STATUS m_status;
 public:	
 	GenericPlayer(std::string n):m_name(n), m_score(MAX_SCORE){};	
-	virtual bool isHitting() = 0;
+	virtual bool isHitting(Card *) = 0;
 	friend std::ostream & operator << (std::ostream & out, GenericPlayer & aGP);
 	GenericPlayer & operator ++ (){++m_score; return *this;};
 	GenericPlayer & operator -- (){if(m_score != 0) --m_score; return *this;};
@@ -154,10 +154,10 @@ private:
 	std::string win(){return "WIN !!";}
 	std::string lose(){return "LOSE !!";}
 	std::string push(){return "PUSH !!";}
-	std::string points(){return std::to_string(getTotal()) + " points";}
+	std::string blackjack(){return "BLACKJACK !!";}
+	std::string points(){return (getTotal()==21?blackjack():std::to_string(getTotal()) + " points");}
 	std::string score(){return ((m_score < 10?" ":"") + std::to_string(m_score) + "$");};
-	std::string playAway(){return "PLAY AWAY !!";}
-	
+	std::string playAway(){return "PLAY AWAY !!";}	
 };
 bool GenericPlayer::isCardsUp()
 {
@@ -170,7 +170,6 @@ bool GenericPlayer::isCardsUp()
 }
 std::ostream & operator <<(std::ostream & out, GenericPlayer & aGP)
 {	
-
 	std::string a(aGP.isPlayAway()?aGP.playAway().size()+2:5, 205); a[0] = 201; a[a.size()-1]=187;
 	std::string b(1, 186);
 		std::string temp;
@@ -254,30 +253,42 @@ class Player_Human : public GenericPlayer
 public:
 	Player_Human(std::string n):GenericPlayer(n){}
 private:
-	bool isHitting(){return false;}
-	
+	bool isHitting(Card * aC);	
 };
-
+bool Player_Human::isHitting(Card * aC)
+{
+	if(isBusted()) return false; 
+	return isYes(m_name + ", do you need another card?");
+}
 //------------------------------------------------------------------------
 class Player_AI : public GenericPlayer
 {
 public:
 	Player_AI(std::string n):GenericPlayer(n){}
 private:
-	bool isHitting(){return false;}
+	bool isHitting(Card * aC);
 };
+bool Player_AI::isHitting(Card * aC)
+{
+	int total = getTotal();	
+	int house_card = aC->getValue();
+	if(house_card == 1) house_card = 11;
+	if(total >= 17) return false;
+	if(total <= 11 ) return true;
+	if(house_card >= 7) return true;
+	if(total >= 15) return false;
+	return (rand()%2 == 0);	//dlya intrigi
+}
 //------------------------------------------------------------------------
 class House : public GenericPlayer
 {
 public:
 	House():GenericPlayer("[HOUSE]"){}
 	void flipFirstCard(){if(m_cards.size() != 0) m_cards[0]->flip();}
+	Card * getUpCard(){return m_cards[0];}
 private:
-	bool isHitting(){return false;}
+	bool isHitting(Card *){return getTotal() < 17;}
 };
-
-
-
 //------------------------------------------------------------------------
 class Game
 {
@@ -312,28 +323,31 @@ int Game::play()
 	for(int i=0; i<m_players.size(); ++i)
 		m_players[i]->startOfTurn();
 	m_deck.shuffle();	
-	for(int j=0; j<2; ++j)
+	for(int i=0; i<m_players.size(); ++i) 
 	{
-		for(int i=0; i<m_players.size(); ++i) 
+		if(m_players[i]->isPlayAway())
+			++pl_aw;
+		else
 		{
-			if(m_players[i]->isPlayAway())
-				++pl_aw;
-			else
+			for(int j=0; j<2; ++j)
 				m_deck.deal(m_players[i]);
 		}
 	}
-
 	house->flipFirstCard();
 	std::cout << *this;
 	if(house->isPlayAway()) return -1;
-	if(m_players.size()-pl_aw == 1) return 1;	//что-то не так xxx
+	if(m_players.size()-pl_aw == 1) return 1;
+	Card * house_card = house->getUpCard();
+	
+	
 	for(int i=0; i<m_players.size(); ++i)
 	{
-		while(m_players[i]->isHitting())
+		while(m_players[i]->isHitting(house_card))
 		{
 			m_deck.deal(m_players[i]);			
 			std::cout << *this;
 		}
+		std::cout << *this;
 	}
 	house->flipFirstCard();
 	for(int i=0; i<m_players.size(); ++i)
@@ -346,7 +360,8 @@ int main()
 {
 	srand(time(NULL));
 	system("cls");
-	std::cout << "WELCOME TO BLACKJACK\n\n";  
+	unsigned char ch[] = {3, 4, 5, 6, 0};
+	std::cout << ch << " WELCOME TO BLACKJACK " << ch << std::endl << std::endl;  
     int numPlayers = getPlayersCount("How many players?", 7);	
 	int numHumans = (numPlayers == 1)?1:getPlayersCount("How many humans of them?", numPlayers);	
 	std::string buffer;
@@ -364,10 +379,9 @@ int main()
 	for(int i=0; i<names_AI.size(); ++i)
 		names_AI[i] = "<COMPUTER " + std::to_string(i+1) + ">";
 	Game aGame(names_H, names_AI);
-	int res;
 	do
 	{
-		res = aGame.play();
+		int res = aGame.play();
 		if(res != 0)
 		{
 			std::cout << "GAME OVER. HOUSE IS " << (res < 0?"LOSE !!":"WIN !!") << std::endl;
